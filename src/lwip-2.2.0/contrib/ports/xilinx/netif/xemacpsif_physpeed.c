@@ -123,13 +123,22 @@
 #define PHY_DETECT_MASK 					0x1808
 #define PHY_MARVELL_IDENTIFIER				0x0141
 #define PHY_TI_IDENTIFIER					0x2000
-#define PHY_ADI_IDENTIFIER				0x0283
+#define PHY_ADI_IDENTIFIER					0x0283
 #define PHY_REALTEK_IDENTIFIER				0x001c
-#define PHY_XILINX_PCS_PMA_ID1			0x0174
-#define PHY_XILINX_PCS_PMA_ID2			0x0C00
+#define PHY_XILINX_PCS_PMA_ID1				0x0174
+#define PHY_XILINX_PCS_PMA_ID2				0x0C00
 
-#define MICROCHIP_PHY_IDENTIFIER				0x22
+#define MICROCHIP_PHY_IDENTIFIER			0x22
 #define MICROCHIP_PHY_KSZ9031_MODEL			0x220
+
+#define JLSEMI_PHY_IDENTIFIER 				0x937C
+#define JLSEMI_PHY_SELECT_REG_OFFSET		0x1F
+#define JLSEMI_PHY_SPECIFIC_STATUS_REG_OFFSET	0x1A
+#define JLSEMI_PHY_SPECIFIC_PAGE			0xA43
+#define JLSEMI_PHY_LCR_PAGE					0xD04
+#define JLSEMI_PHY_LED_BLINK_PAGE			0x1000
+#define JLSEMI_PHY_LED_CONTROL_REG_OFFSET	0x10
+#define JLSEMI_PHY_LED_BLINK_REG_OFFSET 	0x14
 
 #define XEMACPS_GMII2RGMII_SPEED1000_FD		0x140
 #define XEMACPS_GMII2RGMII_SPEED100_FD		0x2100
@@ -202,8 +211,9 @@ static void phy_identify(XEmacPs *xemacpsp, u32_t phy_addr, u32_t emacnum)
 		    (phy_reg != PHY_TI_IDENTIFIER) &&
 		    (phy_reg != PHY_REALTEK_IDENTIFIER) &&
 			(phy_reg != MICROCHIP_PHY_IDENTIFIER) &&
+			(phy_reg != JLSEMI_PHY_IDENTIFIER) &&
 		    (phy_reg != PHY_ADI_IDENTIFIER)) {
-			xil_printf("WARNING: Not a Marvell or Microchip or TI or Realtek or Xilinx PCS PMA Ethernet PHY or ADI Ethernet PHY. Please verify the initialization sequence\r\n");
+			xil_printf("WARNING: Not a Marvell or Microchip or JLSemi or TI or Realtek or Xilinx PCS PMA Ethernet PHY or ADI Ethernet PHY. Please verify the initialization sequence\r\n");
 		}
 	}
 }
@@ -828,6 +838,91 @@ static u32_t get_phy_speed_ksz9031(XEmacPs *xemacpsp, u32_t phy_addr)
 	return XST_SUCCESS;
 }
 
+static u32_t get_phy_speed_JL2121(XEmacPs *xemacpsp, u32_t phy_addr)
+{
+	u16_t temp;
+	u16_t control;
+	u16_t status;
+	u16_t status_speed;
+			  
+	u32_t timeout_counter = 0;
+	u32_t temp_speed;
+	u32_t phyregtemp;
+
+	xil_printf("Start PHY autonegotiation \r\n");
+					 
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_RESET_MASK;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+	
+	usleep(10000);
+		  													  
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
+	control |= IEEE_ASYMMETRIC_PAUSE_MASK;
+	control |= IEEE_PAUSE_MASK;
+	control |= ADVERTISE_100;
+	control |= ADVERTISE_10;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					&control);
+	control |= ADVERTISE_1000;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE;
+	control |= IEEE_STAT_AUTONEGOTIATE_RESTART;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	while (1) {
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+		if (control & IEEE_CTRL_RESET_MASK)
+			continue;
+		else
+			break;
+	}
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+
+	xil_printf("Waiting for PHY to complete autonegotiation.\r\n");
+
+	while ( !(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE) ) {
+		sleep(1);
+
+												 
+		timeout_counter++;
+
+		if (timeout_counter == 30) {
+			xil_printf("Auto negotiation error \r\n");
+			return;
+		}
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+	}
+	xil_printf("Autonegotiation complete \r\n");
+
+
+	XEmacPs_PhyWrite(xemacpsp, phy_addr,JLSEMI_PHY_SELECT_REG_OFFSET,JLSEMI_PHY_SPECIFIC_PAGE);
+	XEmacPs_PhyRead(xemacpsp,  phy_addr, JLSEMI_PHY_SPECIFIC_STATUS_REG_OFFSET, &status_speed);
+	
+	XEmacPs_PhyWrite(xemacpsp, phy_addr,JLSEMI_PHY_SELECT_REG_OFFSET,JLSEMI_PHY_LCR_PAGE);
+	XEmacPs_PhyWrite(xemacpsp, phy_addr,JLSEMI_PHY_LED_CONTROL_REG_OFFSET,0xAE01);
+
+	XEmacPs_PhyWrite(xemacpsp, phy_addr,JLSEMI_PHY_SELECT_REG_OFFSET,JLSEMI_PHY_LED_BLINK_PAGE);
+	XEmacPs_PhyWrite(xemacpsp, phy_addr,JLSEMI_PHY_LED_BLINK_REG_OFFSET,0x0704);
+	XEmacPs_PhyWrite(xemacpsp, phy_addr,JLSEMI_PHY_SELECT_REG_OFFSET,0);
+			  
+	if ( (status_speed & 0x20) == 0x20)/* 1000Mbps */
+		return 1000;
+	else if ( (status_speed & 0x10) == 0x10)/* 100Mbps */
+		return 100;
+	else if ( (status_speed & 0x30) == 0x0)/* 10Mbps */
+		return 10;
+	else
+		return 0;
+	return XST_SUCCESS;
+}
+
 static u32_t get_Adi_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 {
 	u16_t temp;
@@ -956,7 +1051,9 @@ static u32_t get_IEEE_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	} else if (phy_identity == PHY_ADI_IDENTIFIER) {
 		RetStatus = get_Adi_phy_speed(xemacpsp, phy_addr);
 	} else if (phy_identity == MICROCHIP_PHY_IDENTIFIER) {
-		RetStatus = get_phy_speed_ksz9031(xemacpsp, phy_addr);	
+		RetStatus = get_phy_speed_ksz9031(xemacpsp, phy_addr);
+	}else if (phy_identity == JLSEMI_PHY_IDENTIFIER) {
+		RetStatus = get_phy_speed_JL2121(xemacpsp, phy_addr);	
 	} else {
 		RetStatus = get_Marvell_phy_speed(xemacpsp, phy_addr);
 	}
