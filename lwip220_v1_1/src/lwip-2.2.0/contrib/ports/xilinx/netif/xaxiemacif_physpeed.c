@@ -100,6 +100,10 @@
 #define JLSEMI_PHY_LED_CONTROL_REG_OFFSET 		0x10
 #define JLSEMI_PHY_LED_BLINK_REG_OFFSET 		0x14
 
+#define PHY_YT8531_IDENTIFIER   0x4f51
+// for rtl8211
+#define PHY_REALTEK_IDENTIFIER   0x001c
+
 /* Loop counters to check for reset done
  */
 #define RESET_TIMEOUT							0xFFFF
@@ -138,11 +142,15 @@ static int detect_phy(XAxiEthernet *xaxiemacp)
 			XAxiEthernet_PhyRead(xaxiemacp, phy_addr, PHY_IDENTIFIER_1_REG,
 										&phy_reg);
 			if ((phy_reg != PHY_MARVELL_IDENTIFIER) &&
-                (phy_reg != TI_PHY_IDENTIFIER)) &&
+                (phy_reg != TI_PHY_IDENTIFIER) &&
+				(phy_reg != PHY_TI_IDENTIFIER) &&
 				(phy_reg != MICROCHIP_PHY_IDENTIFIER) &&
 				(phy_reg != JLSEMI_PHY_IDENTIFIER)
+				(phy_reg != PHY_REALTEK_IDENTIFIER) &&
+				(phy_reg != PHY_YT8531_IDENTIFIER) &&
+				(phy_reg != PHY_ADI_IDENTIFIER))
 				{
-				xil_printf("WARNING: Not a Marvell or Microchip or JLSemi or TI Ethernet PHY. Please verify the initialization sequence\r\n");
+				xil_printf("WARNING: Not a Marvell or Microchip or JLSemi or Motorcomm or TI or Realtek or Xilinx PCS PMA Ethernet PHY or ADI Ethernet PHY. Please verify the initialization sequence\r\n");
 			}
 			phyaddrforemac = phy_addr;
 			return phy_addr;
@@ -598,6 +606,95 @@ unsigned int get_phy_speed_88E1111 (XAxiEthernet *xaxiemacp, u32 phy_addr)
 	return get_phy_negotiated_speed(xaxiemacp, phy_addr);
 }
 
+// for rtl8211
+static u32_t get_realtek_phy_speed(XAxiEthernet *xaxiemacp, u32_t phy_addr)
+{
+	u16_t control;
+	u16_t status;
+	u16_t status_speed;
+	u32_t timeout_counter = 0;
+	u32_t temp_speed;
+
+	xil_printf("Start Realtek PHY autonegotiation \r\n");
+
+	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
+	control |= IEEE_ASYMMETRIC_PAUSE_MASK;
+	control |= IEEE_PAUSE_MASK;
+	control |= ADVERTISE_100;
+	control |= ADVERTISE_10;
+	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, control);
+
+	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					&control);
+	control |= ADVERTISE_1000;
+	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					control);
+
+	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE;
+	control |= IEEE_STAT_AUTONEGOTIATE_RESTART;
+	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_RESET_MASK;
+	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	while (1) {
+		XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+		if (control & IEEE_CTRL_RESET_MASK)
+			continue;
+		else
+			break;
+	}
+
+	xil_printf("phy addr=%d \r\n",phy_addr);
+	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+
+	xil_printf("Waiting for PHY to complete autonegotiation.\r\n");
+
+	while ( !(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE) ) {
+		sleep(1);
+		timeout_counter++;
+
+		if (timeout_counter == 30) {
+			xil_printf("Auto negotiation error \r\n");
+			return XST_FAILURE;
+		}
+		XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+	}
+	xil_printf("Autonegotiation complete \r\n");
+
+	// 1.Industrial Grade：RTL8211FI、RTL8211FDI、RTL8211FI-CG
+    // XEmacPs_PhyRead(xemacpsp, phy_addr,0x1A, &status_speed); /* Industrial RTL8211*/
+	// if (status_speed & 0x04) {
+	// 	temp_speed = status_speed & 0x30;  // I级的是0x30/0x20/0x10, C级的是0xc000/0x8000/0x4000
+
+	// 	if (temp_speed == 0x20)
+	// 			return 1000;
+	// 	else if(temp_speed == 0x10)
+	// 			return 100;
+	// 	else
+	// 			return 10;
+	// 	}
+
+	// 2.Commercial Grade：RTL8211E、RTL8211F-CG
+	XEmacPs_PhyRead(xemacpsp, phy_addr,IEEE_SPECIFIC_STATUS_REG,&status_speed);
+	if (status_speed & 0x400) {
+		temp_speed = status_speed & IEEE_SPEED_MASK;
+
+		if (temp_speed == IEEE_SPEED_1000)
+			return 1000;
+		else if(temp_speed == IEEE_SPEED_100)
+			return 100;
+		else
+			return 10;
+	}
+
+
+	return XST_FAILURE;
+}
+
+// get phy speed function for ksz9031
 unsigned int get_phy_speed_ksz9031(XAxiEthernet *xaxiemacp, u32 phy_addr)
 {
 	u16 control;
@@ -758,6 +855,81 @@ static u32_t get_phy_speed_JL2121(XAxiEthernet *xaxiemacp, u32_t phy_addr)
 	return XST_SUCCESS;
 }
 
+// get phy speed function for YT8531 
+static u32_t get_YT8531_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
+{
+	u16_t control;
+	u16_t status;
+	u16_t status_speed;
+	u32_t timeout_counter = 0;
+	u32_t temp_speed;
+
+	xil_printf("Start YT8531 PHY autonegotiation \r\n");
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
+	control |= IEEE_ASYMMETRIC_PAUSE_MASK;
+	control |= IEEE_PAUSE_MASK;
+	control |= ADVERTISE_100;
+	control |= ADVERTISE_10;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					&control);
+	control |= ADVERTISE_1000;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE;
+	control |= IEEE_STAT_AUTONEGOTIATE_RESTART;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_RESET_MASK;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	while (1) {
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+		if (control & IEEE_CTRL_RESET_MASK)
+			continue;
+		else
+			break;
+	}
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+
+	xil_printf("Waiting for PHY to complete autonegotiation.\r\n");
+
+	while ( !(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE) ) {
+		sleep(1);
+		timeout_counter++;
+
+		if (timeout_counter == 30) {
+			xil_printf("Auto negotiation error \r\n");
+			return XST_FAILURE;
+		}
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+	}
+	xil_printf("Autonegotiation complete \r\n");
+
+	//YT8531 REG
+	XEmacPs_PhyRead(xemacpsp, phy_addr,0X11,&status_speed);
+	status_speed = status_speed>>8;
+
+	if (status_speed & 0x04) {
+		temp_speed = status_speed & 0xc0;
+
+		if (temp_speed == 0x80)
+			return 1000;
+		else if(temp_speed == 0x40)
+			return 100;
+		else
+			return 10;
+
+	}
+	return XST_FAILURE;
+}
+
 unsigned get_IEEE_phy_speed(XAxiEthernet *xaxiemacp)
 {
 	u16 phy_identifier;
@@ -789,17 +961,28 @@ unsigned get_IEEE_phy_speed(XAxiEthernet *xaxiemacp)
 		phytype = XAxiEthernet_Get_Phy_Interface(xaxiemacp);
 #endif
 		if (phy_model == TI_PHY_DP83867_MODEL && phytype == XAE_PHY_TYPE_SGMII) {
+			xil_printf("Phy %d is TI DP83867 SGMII\n\r", phy_addr);
 			return get_phy_speed_TI_DP83867_SGMII(xaxiemacp, phy_addr);
 		}
 
 		if (phy_model == TI_PHY_DP83867_MODEL) {
+			xil_printf("Phy %d is TI DP83867\n\r", phy_addr);
 			return get_phy_speed_TI_DP83867(xaxiemacp, phy_addr);
 		}
 	} else if(phy_identifier == MICROCHIP_PHY_IDENTIFIER) {
+		xil_printf("Phy %d is KSZ9031\n\r", phy_addr);
 		return get_phy_speed_ksz9031(xaxiemacp, phy_addr);
 	} else if(phy_identifier == JLSEMI_PHY_IDENTIFIER) {
+		xil_printf("Phy %d is JLSEMI\n\r", phy_addr);
 		return get_phy_speed_JL2121(xaxiemacp, phy_addr);
-	} else {
+	}else if(phy_identifier == PHY_REALTEK_IDENTIFIER){
+		xil_printf("Phy %d is RTL8211\n\r", phy_addr);
+		return get_realtek_phy_speed(xaxiemacp, phy_addr);
+	}
+	else if(phy_identifier == PHY_YT8531_IDENTIFIER){
+		xil_printf("Phy %d is YT8531\n\r", phy_addr);
+		return get_YT8531_phy_speed(xaxiemacp, phy_addr);
+	}else {
 	    LWIP_DEBUGF(NETIF_DEBUG, ("XAxiEthernet get_IEEE_phy_speed: Detected PHY with unknown identifier/model.\r\n"));
 	}
 #endif

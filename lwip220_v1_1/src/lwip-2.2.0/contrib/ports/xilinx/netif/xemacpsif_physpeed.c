@@ -116,6 +116,46 @@
 #include "bspconfig.h"
 #include "xil_smc.h"
 #endif
+#define PHY_YT8531_IDENTIFIER   0x4f51
+/* Advertisement control register. */
+#define ADVERTISE_10HALF		0x0020  /* Try for 10mbps half-duplex  */
+#define ADVERTISE_10FULL		0x0040  /* Try for 10mbps full-duplex  */
+#define ADVERTISE_100HALF		0x0080  /* Try for 100mbps half-duplex */
+#define ADVERTISE_100FULL		0x0100  /* Try for 100mbps full-duplex */
+
+#define ADVERTISE_100			(ADVERTISE_100FULL | ADVERTISE_100HALF)
+#define ADVERTISE_10			(ADVERTISE_10FULL | ADVERTISE_10HALF)
+#define ADVERTISE_1000			0x0300
+
+#define IEEE_CONTROL_REG_OFFSET				0
+#define IEEE_STATUS_REG_OFFSET				1
+#define IEEE_AUTONEGO_ADVERTISE_REG			4
+#define IEEE_PARTNER_ABILITIES_1_REG_OFFSET	5
+#define IEEE_1000_ADVERTISE_REG_OFFSET		9
+#define IEEE_COPPER_SPECIFIC_CONTROL_REG	16
+#define IEEE_SPECIFIC_STATUS_REG			17
+#define IEEE_COPPER_SPECIFIC_STATUS_REG_2	19
+#define IEEE_CONTROL_REG_MAC				21
+#define IEEE_PAGE_ADDRESS_REGISTER			22
+#define IEEE_CTRL_1GBPS_LINKSPEED_MASK		0x2040
+#define IEEE_CTRL_LINKSPEED_MASK			0x0040
+#define IEEE_CTRL_LINKSPEED_1000M			0x0040
+#define IEEE_CTRL_LINKSPEED_100M			0x2000
+#define IEEE_CTRL_LINKSPEED_10M				0x0000
+#define IEEE_CTRL_RESET_MASK				0x8000
+
+#define IEEE_SPEED_MASK		0xC000
+#define IEEE_SPEED_1000		0x8000
+#define IEEE_SPEED_100		0x4000
+
+#define IEEE_CTRL_RESET_MASK				0x8000
+#define IEEE_CTRL_AUTONEGOTIATE_ENABLE		0x1000
+#define IEEE_STAT_AUTONEGOTIATE_COMPLETE	0x0020
+#define IEEE_STAT_AUTONEGOTIATE_RESTART		0x0200
+#define IEEE_RGMII_TXRX_CLOCK_DELAYED_MASK	0x0030
+#define IEEE_ASYMMETRIC_PAUSE_MASK			0x0800
+#define IEEE_PAUSE_MASK						0x0400
+#define IEEE_AUTONEG_ERROR_MASK				0x8000
 
 #define PHY_DETECT_REG  						1
 #define PHY_IDENTIFIER_1_REG					2
@@ -212,8 +252,9 @@ static void phy_identify(XEmacPs *xemacpsp, u32_t phy_addr, u32_t emacnum)
 		    (phy_reg != PHY_REALTEK_IDENTIFIER) &&
 			(phy_reg != MICROCHIP_PHY_IDENTIFIER) &&
 			(phy_reg != JLSEMI_PHY_IDENTIFIER) &&
+			(phy_reg != PHY_YT8531_IDENTIFIER) &&
 		    (phy_reg != PHY_ADI_IDENTIFIER)) {
-			xil_printf("WARNING: Not a Marvell or Microchip or JLSemi or TI or Realtek or Xilinx PCS PMA Ethernet PHY or ADI Ethernet PHY. Please verify the initialization sequence\r\n");
+			xil_printf("WARNING: Not a Marvell or Microchip or JLSemi or Motorcomm or TI or Realtek or Xilinx PCS PMA Ethernet PHY or ADI Ethernet PHY. Please verify the initialization sequence\r\n");
 		}
 	}
 }
@@ -645,6 +686,7 @@ static u32_t get_Marvell_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	return XST_SUCCESS;
 }
 
+// for rtl8211
 static u32_t get_Realtek_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 {
 	u16_t control;
@@ -653,7 +695,34 @@ static u32_t get_Realtek_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	u32_t timeout_counter = 0;
 	u32_t temp_speed;
 
-	xil_printf("Start PHY autonegotiation \r\n");
+	u16_t phy_identity;
+	u32_t RetStatus;
+ 
+    u32_t RTL_SPECIFIC_STATUS_REG;
+    u32_t RTL_LINK_STATUS_MASK;
+    u32_t RTL_SPEED_MASK;
+    u32_t RTL_SPEED_1000;
+    u32_t RTL_SPEED_100;
+    
+    // Confirm the chip type(E or F) and redefine the register address and mask according to the model
+    XEmacPs_PhyRead(xemacpsp, phy_addr, PHY_IDENTIFIER_2_REG,
+					&phy_identity);
+    if (phy_identity == 0XC916) {
+	    xil_printf("Start PHY:RTL8211F autonegotiation\r\n");
+        RTL_SPECIFIC_STATUS_REG = 0X1A;
+        RTL_LINK_STATUS_MASK    = 0x04;
+        RTL_SPEED_MASK          = 0x30;
+        RTL_SPEED_1000          = 0x20;
+        RTL_SPEED_100           = 0x10;
+    }
+    else if (phy_identity == 0XC915) {
+	    xil_printf("Start PHY:RTL8211E autonegotiation\r\n");
+        RTL_SPECIFIC_STATUS_REG = 0X0011;
+        RTL_LINK_STATUS_MASK    = 0x0400;
+        RTL_SPEED_MASK          = 0xC000;
+        RTL_SPEED_1000          = 0x8000;
+        RTL_SPEED_100           = 0x4000;
+    }
 
 	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
 	control |= IEEE_ASYMMETRIC_PAUSE_MASK;
@@ -701,14 +770,14 @@ static u32_t get_Realtek_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	}
 	xil_printf("autonegotiation complete \r\n");
 
-	XEmacPs_PhyRead(xemacpsp, phy_addr,IEEE_SPECIFIC_STATUS_REG,
+	XEmacPs_PhyRead(xemacpsp, phy_addr,RTL_SPECIFIC_STATUS_REG,
 					&status_speed);
-	if (status_speed & 0x400) {
-		temp_speed = status_speed & IEEE_SPEED_MASK;
+	if (status_speed & RTL_LINK_STATUS_MASK) {
+		temp_speed = status_speed & RTL_SPEED_MASK;
 
-		if (temp_speed == IEEE_SPEED_1000)
+		if (temp_speed == RTL_SPEED_1000)
 			return 1000;
-		else if(temp_speed == IEEE_SPEED_100)
+		else if(temp_speed == RTL_SPEED_100)
 			return 100;
 		else
 			return 10;
@@ -757,8 +826,6 @@ static u32_t get_phy_speed_ksz9031(XEmacPs *xemacpsp, u32_t phy_addr)
 	u16_t status;
 	u16_t status_speed;
 	u32_t timeout_counter = 0;
-	u32_t temp_speed;
-	u32_t phyregtemp;
 
 	xil_printf("Start PHY autonegotiation \r\n");
 
@@ -818,7 +885,7 @@ static u32_t get_phy_speed_ksz9031(XEmacPs *xemacpsp, u32_t phy_addr)
 
 		if (timeout_counter == 30) {
 			xil_printf("Auto negotiation error \r\n");
-			return;
+            return XST_FAILURE;
 		}
 		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
 	}
@@ -840,14 +907,11 @@ static u32_t get_phy_speed_ksz9031(XEmacPs *xemacpsp, u32_t phy_addr)
 
 static u32_t get_phy_speed_JL2121(XEmacPs *xemacpsp, u32_t phy_addr)
 {
-	u16_t temp;
 	u16_t control;
 	u16_t status;
 	u16_t status_speed;
 			  
 	u32_t timeout_counter = 0;
-	u32_t temp_speed;
-	u32_t phyregtemp;
 
 	xil_printf("Start PHY autonegotiation \r\n");
 					 
@@ -895,7 +959,7 @@ static u32_t get_phy_speed_JL2121(XEmacPs *xemacpsp, u32_t phy_addr)
 
 		if (timeout_counter == 30) {
 			xil_printf("Auto negotiation error \r\n");
-			return;
+            return XST_FAILURE;
 		}
 		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
 	}
@@ -923,6 +987,80 @@ static u32_t get_phy_speed_JL2121(XEmacPs *xemacpsp, u32_t phy_addr)
 	return XST_SUCCESS;
 }
 
+static u32_t get_YT8531_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
+{
+	u16_t control;
+	u16_t status;
+	u16_t status_speed;
+	u32_t timeout_counter = 0;
+	u32_t temp_speed;
+
+	xil_printf("Start YT8531 PHY autonegotiation \r\n");
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
+	control |= IEEE_ASYMMETRIC_PAUSE_MASK;
+	control |= IEEE_PAUSE_MASK;
+	control |= ADVERTISE_100;
+	control |= ADVERTISE_10;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					&control);
+	control |= ADVERTISE_1000;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET,
+					control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE;
+	control |= IEEE_STAT_AUTONEGOTIATE_RESTART;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_RESET_MASK;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	while (1) {
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+		if (control & IEEE_CTRL_RESET_MASK)
+			continue;
+		else
+			break;
+	}
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+
+	xil_printf("Waiting for PHY to complete autonegotiation.\r\n");
+
+	while ( !(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE) ) {
+		sleep(1);
+		timeout_counter++;
+
+		if (timeout_counter == 30) {
+			xil_printf("Auto negotiation error \r\n");
+			return XST_FAILURE;
+		}
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+	}
+	xil_printf("autonegotiation complete \r\n");
+
+	//YT8531 REG
+	XEmacPs_PhyRead(xemacpsp, phy_addr,0X11,&status_speed);
+	status_speed = status_speed>>8;
+
+	if (status_speed & 0x04) {
+		temp_speed = status_speed & 0xc0;
+
+		if (temp_speed == 0x80)
+			return 1000;
+		else if(temp_speed == 0x40)
+			return 100;
+		else
+			return 10;
+
+	}
+	return XST_FAILURE;
+}
+	
 static u32_t get_Adi_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 {
 	u16_t temp;
@@ -1043,17 +1181,26 @@ static u32_t get_IEEE_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	XEmacPs_PhyRead(xemacpsp, phy_addr, PHY_IDENTIFIER_1_REG,
 					&phy_identity);
 	if (phy_identity == PHY_TI_IDENTIFIER) {
+		xil_printf("Phy %d is TI \n\r", phy_addr);
 		RetStatus = get_TI_phy_speed(xemacpsp, phy_addr);
 	} else if (phy_identity == PHY_REALTEK_IDENTIFIER) {
+		xil_printf("Phy %d is Realtek RTL8211 \n\r", phy_addr);
 		RetStatus = get_Realtek_phy_speed(xemacpsp, phy_addr);
 	} else if (phy_identity == PHY_XILINX_PCS_PMA_ID1) {
+		xil_printf("Phy %d is Xilinx \n\r", phy_addr);
 		RetStatus = get_Xilinx_pcs_pma_phy_speed(xemacpsp, phy_addr);
 	} else if (phy_identity == PHY_ADI_IDENTIFIER) {
+		xil_printf("Phy %d is ADI \n\r", phy_addr);
 		RetStatus = get_Adi_phy_speed(xemacpsp, phy_addr);
 	} else if (phy_identity == MICROCHIP_PHY_IDENTIFIER) {
+		xil_printf("Phy %d is KSZ9031\n\r", phy_addr);
 		RetStatus = get_phy_speed_ksz9031(xemacpsp, phy_addr);
 	}else if (phy_identity == JLSEMI_PHY_IDENTIFIER) {
-		RetStatus = get_phy_speed_JL2121(xemacpsp, phy_addr);	
+		xil_printf("Phy %d is JL2121\n\r", phy_addr);
+		RetStatus = get_phy_speed_JL2121(xemacpsp, phy_addr);
+	else if (phy_identity == PHY_YT8531_IDENTIFIER) {
+				xil_printf("Phy %d is YT8531\n\r", phy_addr);
+			RetStatus = get_YT8531_phy_speed(xemacpsp, phy_addr);
 	} else {
 		RetStatus = get_Marvell_phy_speed(xemacpsp, phy_addr);
 	}
