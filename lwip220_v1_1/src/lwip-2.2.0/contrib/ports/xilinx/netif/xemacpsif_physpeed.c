@@ -116,7 +116,15 @@
 #include "bspconfig.h"
 #include "xil_smc.h"
 #endif
+
+/* LANTIQ PHY Flags */ 
+#define PHY_LANTIQ_IDENTIFIER 	0x0302
+#define IEEE_MII_CONTROL_REG	0x17
+#define IEEE_MII_STATUS_REG		0x18
+
+/* Motorcomm YT8531 PHY Flags */
 #define PHY_YT8531_IDENTIFIER   0x4f51
+
 /* Advertisement control register. */
 #define ADVERTISE_10HALF		0x0020  /* Try for 10mbps half-duplex  */
 #define ADVERTISE_10FULL		0x0040  /* Try for 10mbps full-duplex  */
@@ -253,8 +261,10 @@ static void phy_identify(XEmacPs *xemacpsp, u32_t phy_addr, u32_t emacnum)
 			(phy_reg != MICROCHIP_PHY_IDENTIFIER) &&
 			(phy_reg != JLSEMI_PHY_IDENTIFIER) &&
 			(phy_reg != PHY_YT8531_IDENTIFIER) &&
-		    (phy_reg != PHY_ADI_IDENTIFIER)) {
-			xil_printf("WARNING: Not a Marvell or Microchip or JLSemi or Motorcomm or TI or Realtek or Xilinx PCS PMA Ethernet PHY or ADI Ethernet PHY. Please verify the initialization sequence\r\n");
+			(phy_reg != PHY_ADI_IDENTIFIER) &&
+			(phy_reg != PHY_LANTIQ_IDENTIFIER)) {
+			xil_printf("WARNING: Unknown Ethernet PHY. Please verify the initialization sequence\r\n");
+			xil_printf("phy_id = %x\r\n", phy_reg);
 		}
 	}
 }
@@ -595,6 +605,33 @@ static u32_t get_TI_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	}
 
 	return XST_SUCCESS;
+}
+
+// to test
+static u32_t get_LANTIQ_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr) {
+    u16_t control, status, partner_caps;
+    xil_printf("Lantiq PHY: starting auto-negotiation\r\n");
+
+    XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+    control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE | IEEE_STAT_AUTONEGOTIATE_RESTART;
+    control &= IEEE_CTRL_ISOLATE_DISABLE;
+    XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+    xil_printf("Waiting for auto-negotiation\r\n");
+    do {
+        sleep(1);
+        XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+    } while (!(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE));
+
+    xil_printf("Auto-negotiation complete\r\n");
+    XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_PARTNER_ABILITIES_1_REG_OFFSET, &partner_caps);
+    if (partner_caps & IEEE_AN1_ABILITY_MASK_100MBPS)
+        return 100;
+    else if (partner_caps & IEEE_AN1_ABILITY_MASK_10MBPS)
+        return 10;
+
+    xil_printf("Lantiq PHY: unknown speed, defaulting to 10Mbps\r\n");
+    return 10;
 }
 
 static u32_t get_Marvell_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
@@ -1195,12 +1232,16 @@ static u32_t get_IEEE_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	} else if (phy_identity == MICROCHIP_PHY_IDENTIFIER) {
 		xil_printf("Phy %d is KSZ9031\n\r", phy_addr);
 		RetStatus = get_phy_speed_ksz9031(xemacpsp, phy_addr);
-	}else if (phy_identity == JLSEMI_PHY_IDENTIFIER) {
+	} else if (phy_identity == JLSEMI_PHY_IDENTIFIER) {
 		xil_printf("Phy %d is JL2121\n\r", phy_addr);
 		RetStatus = get_phy_speed_JL2121(xemacpsp, phy_addr);
-	else if (phy_identity == PHY_YT8531_IDENTIFIER) {
-				xil_printf("Phy %d is YT8531\n\r", phy_addr);
-			RetStatus = get_YT8531_phy_speed(xemacpsp, phy_addr);
+	} else if (phy_identity == PHY_YT8531_IDENTIFIER) {
+		xil_printf("Phy %d is YT8531\n\r", phy_addr);
+		RetStatus = get_YT8531_phy_speed(xemacpsp, phy_addr);
+	} else if (phy_identity == PHY_LANTIQ_IDENTIFIER) {
+		xil_printf("Phy %d is LANTIQ\n\r", phy_addr);
+		RetStatus = get_LANTIQ_phy_speed(xemacpsp, phy_addr);	//test
+		// RetStatus = get_Lantiq_phy_speed(xemacpsp, phy_addr);
 	} else {
 		RetStatus = get_Marvell_phy_speed(xemacpsp, phy_addr);
 	}

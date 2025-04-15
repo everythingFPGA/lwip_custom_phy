@@ -1,33 +1,33 @@
 /*
- * Copyright (C) 2010 - 2022 Xilinx, Inc.
- * Copyright (C) 2022 - 2024 Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
- * SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
- * OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
- * OF SUCH DAMAGE.
- *
- * This file is part of the lwIP TCP/IP stack.
- *
- */
+* Copyright (C) 2010 - 2022 Xilinx, Inc.
+* Copyright (C) 2022 - 2024 Advanced Micro Devices, Inc.
+* All rights reserved.
+*
+* Redistribution and use in source and binary forms, with or without modification,
+* are permitted provided that the following conditions are met:
+*
+* 1. Redistributions of source code must retain the above copyright notice,
+*    this list of conditions and the following disclaimer.
+* 2. Redistributions in binary form must reproduce the above copyright notice,
+*    this list of conditions and the following disclaimer in the documentation
+*    and/or other materials provided with the distribution.
+* 3. The name of the author may not be used to endorse or promote products
+*    derived from this software without specific prior written permission.
+*
+* THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+* WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+* MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+* SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+* EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+* OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+* INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+* CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+* IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
+* OF SUCH DAMAGE.
+*
+* This file is part of the lwIP TCP/IP stack.
+*
+*/
 
 #include "netif/xaxiemacif.h"
 #include "lwipopts.h"
@@ -100,12 +100,22 @@
 #define JLSEMI_PHY_LED_CONTROL_REG_OFFSET 		0x10
 #define JLSEMI_PHY_LED_BLINK_REG_OFFSET 		0x14
 
-#define PHY_YT8531_IDENTIFIER   0x4f51
-// for rtl8211
-#define PHY_REALTEK_IDENTIFIER   0x001c
+/* Motorcomm YT8531 PHY Flags */
+#define PHY_YT8531_IDENTIFIER   			0x4f51
+
+/* RTL8211 PHY Flags */ 
+#define PHY_REALTEK_IDENTIFIER   			0x001c
+
+/* LANTIQ PHY Flags */ 
+#define PHY_LANTIQ_IDENTIFIER 				0x0302
+#define IEEE_MII_CONTROL_REG                0x17
+#define IEEE_MII_STATUS_REG                 0x18
+
+/* ADI PHY Flags */
+// #define PHY_ADI_IDENTIFIER					0x0283
 
 /* Loop counters to check for reset done
- */
+*/
 #define RESET_TIMEOUT							0xFFFF
 #define AUTO_NEG_TIMEOUT 						0x00FFFFFF
 
@@ -139,18 +149,18 @@ static int detect_phy(XAxiEthernet *xaxiemacp)
 			/* Found a valid PHY address */
 			LWIP_DEBUGF(NETIF_DEBUG, ("XAxiEthernet detect_phy: PHY detected at address %d.\r\n", phy_addr));
 			LWIP_DEBUGF(NETIF_DEBUG, ("XAxiEthernet detect_phy: PHY detected.\r\n"));
-			XAxiEthernet_PhyRead(xaxiemacp, phy_addr, PHY_IDENTIFIER_1_REG,
-										&phy_reg);
+			XAxiEthernet_PhyRead(xaxiemacp, phy_addr, PHY_IDENTIFIER_1_REG, &phy_reg);
 			if ((phy_reg != PHY_MARVELL_IDENTIFIER) &&
-                (phy_reg != TI_PHY_IDENTIFIER) &&
+				(phy_reg != TI_PHY_IDENTIFIER) &&
 				(phy_reg != PHY_TI_IDENTIFIER) &&
 				(phy_reg != MICROCHIP_PHY_IDENTIFIER) &&
-				(phy_reg != JLSEMI_PHY_IDENTIFIER)
+				(phy_reg != JLSEMI_PHY_IDENTIFIER) &&
 				(phy_reg != PHY_REALTEK_IDENTIFIER) &&
 				(phy_reg != PHY_YT8531_IDENTIFIER) &&
-				(phy_reg != PHY_ADI_IDENTIFIER))
-				{
-				xil_printf("WARNING: Not a Marvell or Microchip or JLSemi or Motorcomm or TI or Realtek or Xilinx PCS PMA Ethernet PHY or ADI Ethernet PHY. Please verify the initialization sequence\r\n");
+				// (phy_reg != PHY_ADI_IDENTIFIER) &&
+				(phy_reg != PHY_LANTIQ_IDENTIFIER)) {
+				xil_printf("WARNING: Unknown Ethernet PHY. Please verify the initialization sequence\r\n");
+				xil_printf("phy_id = %x\r\n", phy_reg);
 			}
 			phyaddrforemac = phy_addr;
 			return phy_addr;
@@ -174,7 +184,7 @@ static int detect_phy(XAxiEthernet *xaxiemacp)
 
 	LWIP_DEBUGF(NETIF_DEBUG, ("XAxiEthernet detect_phy: No PHY detected.  Assuming a PHY at address 0\r\n"));
 
-        /* default to zero */
+		/* default to zero */
 	return 0;
 }
 
@@ -183,7 +193,7 @@ static int isphy_pcspma(XAxiEthernet *xaxiemacp, u32 phy_addr)
 	u16 phy_id;
 
 	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, PHY_IDENTIFIER_1_REG,
-			    &phy_id);
+				&phy_id);
 	if (phy_id == PHY_XILINX_PCS_PMA_ID1) {
 		XAxiEthernet_PhyRead(xaxiemacp, phy_addr, PHY_IDENTIFIER_2_REG,
 				&phy_id);
@@ -249,7 +259,7 @@ unsigned int get_phy_negotiated_speed (XAxiEthernet *xaxiemacp, u32 phy_addr)
 	control |= IEEE_STAT_AUTONEGOTIATE_RESTART;
 
 	if (isphy_pcspma(xaxiemacp, phy_addr)) {
-	    control &= IEEE_CTRL_ISOLATE_DISABLE;
+		control &= IEEE_CTRL_ISOLATE_DISABLE;
 	}
 
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET,
@@ -325,9 +335,9 @@ unsigned int get_phy_negotiated_speed (XAxiEthernet *xaxiemacp, u32 phy_addr)
 							XAxiEthernet_PhyRead(xaxiemacp, phy_addr,
 									IEEE_STATUS_REG_OFFSET,
 									&status);
-	    }
+		}
 
-		xil_printf("autonegotiation complete \r\n");
+		xil_printf("Autonegotiation complete \r\n");
 
 		XAxiEthernet_PhyRead(xaxiemacp, phy_addr,
 										IEEE_PARTNER_ABILITIES_1_REG_OFFSET,
@@ -418,45 +428,45 @@ unsigned int get_phy_speed_TI_DP83867_SGMII(XAxiEthernet *xaxiemacp, u32 phy_add
 
 	/* Enable SGMII Clock */
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_REGCR,
-			      TI_PHY_REGCR_DEVAD_EN);
+				TI_PHY_REGCR_DEVAD_EN);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_ADDDR,
-			      TI_PHY_SGMIITYPE);
+				TI_PHY_SGMIITYPE);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_REGCR,
-			      TI_PHY_REGCR_DEVAD_EN | TI_PHY_REGCR_DEVAD_DATAEN);
+				TI_PHY_REGCR_DEVAD_EN | TI_PHY_REGCR_DEVAD_DATAEN);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_ADDDR,
-			      TI_PHY_SGMIICLK_EN);
+				TI_PHY_SGMIICLK_EN);
 
 	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET,
-			     &control);
+				&control);
 	control |= (IEEE_CTRL_AUTONEGOTIATE_ENABLE | IEEE_CTRL_LINKSPEED_1000M |
-		    IEEE_CTRL_FULL_DUPLEX);
+			IEEE_CTRL_FULL_DUPLEX);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET,
-			      control);
+				control);
 
 	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, TI_PHY_CFGR2, &control);
 	control &= TI_PHY_CFGR2_MASK;
 	control |= (TI_PHY_CFG2_SPEEDOPT_10EN   |
-		    TI_PHY_CFG2_SGMII_AUTONEGEN |
-		    TI_PHY_CFG2_SPEEDOPT_ENH    |
-		    TI_PHY_CFG2_SPEEDOPT_CNT    |
-		    TI_PHY_CFG2_SPEEDOPT_INTLOW);
+			TI_PHY_CFG2_SGMII_AUTONEGEN |
+			TI_PHY_CFG2_SPEEDOPT_ENH    |
+			TI_PHY_CFG2_SPEEDOPT_CNT    |
+			TI_PHY_CFG2_SPEEDOPT_INTLOW);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_CFGR2, control);
 
 	/* Disable RGMII */
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_REGCR,
-			      TI_PHY_REGCR_DEVAD_EN);
+				TI_PHY_REGCR_DEVAD_EN);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_ADDDR,
-			      DP83867_R32_RGMIICTL1);
+				DP83867_R32_RGMIICTL1);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_REGCR,
-			      TI_PHY_REGCR_DEVAD_EN | TI_PHY_REGCR_DEVAD_DATAEN);
+				TI_PHY_REGCR_DEVAD_EN | TI_PHY_REGCR_DEVAD_DATAEN);
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_ADDDR, 0);
 
 	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_PHYCTRL,
-			      TI_PHY_CR_SGMII_EN);
+				TI_PHY_CR_SGMII_EN);
 
 	xil_printf("Waiting for Link to be up \r\n");
 	XAxiEthernet_PhyRead(xaxiemacp, phy_addr,
-			     IEEE_PARTNER_ABILITIES_1_REG_OFFSET, &temp);
+				IEEE_PARTNER_ABILITIES_1_REG_OFFSET, &temp);
 	while(!(temp & 0x4000)) {
 		XAxiEthernet_PhyRead(xaxiemacp, phy_addr,
 				IEEE_PARTNER_ABILITIES_1_REG_OFFSET, &temp);
@@ -581,7 +591,7 @@ unsigned int get_phy_speed_88E1111 (XAxiEthernet *xaxiemacp, u32 phy_addr)
 		XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET,
 													&control);
 		XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET,
-	                                        control | IEEE_CTRL_RESET_MASK);
+											control | IEEE_CTRL_RESET_MASK);
 
 		TimeOut = RESET_TIMEOUT;
 		while (TimeOut) {
@@ -607,7 +617,7 @@ unsigned int get_phy_speed_88E1111 (XAxiEthernet *xaxiemacp, u32 phy_addr)
 }
 
 // for rtl8211
-static u32_t get_realtek_phy_speed(XAxiEthernet *xaxiemacp, u32_t phy_addr)
+unsigned int get_realtek_phy_speed(XAxiEthernet *xaxiemacp, u32 phy_addr)
 {
 	u16_t control;
 	u16_t status;
@@ -665,7 +675,7 @@ static u32_t get_realtek_phy_speed(XAxiEthernet *xaxiemacp, u32_t phy_addr)
 	xil_printf("Autonegotiation complete \r\n");
 
 	// 1.Industrial Grade：RTL8211FI、RTL8211FDI、RTL8211FI-CG
-    // XEmacPs_PhyRead(xemacpsp, phy_addr,0x1A, &status_speed); /* Industrial RTL8211*/
+	// XEmacPs_PhyRead(xemacpsp, phy_addr,0x1A, &status_speed); /* Industrial RTL8211*/
 	// if (status_speed & 0x04) {
 	// 	temp_speed = status_speed & 0x30;  // I级的是0x30/0x20/0x10, C级的是0xc000/0x8000/0x4000
 
@@ -770,7 +780,7 @@ unsigned int get_phy_speed_ksz9031(XAxiEthernet *xaxiemacp, u32 phy_addr)
 		return 0;
 }
 
-static u32_t get_phy_speed_JL2121(XAxiEthernet *xaxiemacp, u32_t phy_addr)
+unsigned int get_phy_speed_JL2121(XAxiEthernet *xaxiemacp, u32 phy_addr)
 {
 	u16_t temp;
 	u16_t control;
@@ -856,8 +866,10 @@ static u32_t get_phy_speed_JL2121(XAxiEthernet *xaxiemacp, u32_t phy_addr)
 }
 
 // get phy speed function for YT8531 
-static u32_t get_YT8531_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
+// probabbly not working, need to check
+unsigned int get_YT8531_phy_speed(XEmacPs *xemacpsp, u32 phy_addr)
 {
+	xil_printf("Probabbly not working, need to check \r\n");
 	u16_t control;
 	u16_t status;
 	u16_t status_speed;
@@ -930,6 +942,28 @@ static u32_t get_YT8531_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	return XST_FAILURE;
 }
 
+unsigned int get_phy_speed_LANTIQ(XAxiEthernet *xaxiemacp, u32 phy_addr) {
+	u16 control, status, partner_caps;
+	xil_printf("Lantiq PHY: starting auto-negotiation\r\n");
+
+	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE | IEEE_STAT_AUTONEGOTIATE_RESTART;
+	XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	do {
+		XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+	} while (!(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE));
+
+	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, IEEE_PARTNER_ABILITIES_1_REG_OFFSET, &partner_caps);
+	if (partner_caps & IEEE_AN1_ABILITY_MASK_100MBPS)
+		return 100;
+	else if (partner_caps & IEEE_AN1_ABILITY_MASK_10MBPS)
+		return 10;
+
+	xil_printf("Lantiq PHY: unknown speed, default to 10Mbps\r\n");
+	return 10;
+}
+
 unsigned get_IEEE_phy_speed(XAxiEthernet *xaxiemacp)
 {
 	u16 phy_identifier;
@@ -944,7 +978,7 @@ unsigned get_IEEE_phy_speed(XAxiEthernet *xaxiemacp)
 	XAxiEthernet_PhyRead(xaxiemacp, phy_addr, PHY_IDENTIFIER_2_REG, &phy_model);
 
 /* Depending upon what manufacturer PHY is connected, a different mask is
- * needed to determine the specific model number of the PHY. */
+* needed to determine the specific model number of the PHY. */
 	if (phy_identifier == MARVEL_PHY_IDENTIFIER) {
 		phy_model = phy_model & MARVEL_PHY_MODEL_NUM_MASK;
 
@@ -975,15 +1009,18 @@ unsigned get_IEEE_phy_speed(XAxiEthernet *xaxiemacp)
 	} else if(phy_identifier == JLSEMI_PHY_IDENTIFIER) {
 		xil_printf("Phy %d is JLSEMI\n\r", phy_addr);
 		return get_phy_speed_JL2121(xaxiemacp, phy_addr);
-	}else if(phy_identifier == PHY_REALTEK_IDENTIFIER){
+	} else if(phy_identifier == PHY_REALTEK_IDENTIFIER) {
 		xil_printf("Phy %d is RTL8211\n\r", phy_addr);
 		return get_realtek_phy_speed(xaxiemacp, phy_addr);
-	}
-	else if(phy_identifier == PHY_YT8531_IDENTIFIER){
+	} else if(phy_identifier == PHY_YT8531_IDENTIFIER) {
 		xil_printf("Phy %d is YT8531\n\r", phy_addr);
 		return get_YT8531_phy_speed(xaxiemacp, phy_addr);
+	} else if (phy_identifier == PHY_LANTIQ_IDENTIFIER) {
+		xil_printf("Phy %d is LANTIQ\n\r", phy_addr);
+		return get_phy_speed_LANTIQ(xemacpsp, phy_addr);
+	}
 	}else {
-	    LWIP_DEBUGF(NETIF_DEBUG, ("XAxiEthernet get_IEEE_phy_speed: Detected PHY with unknown identifier/model.\r\n"));
+		LWIP_DEBUGF(NETIF_DEBUG, ("XAxiEthernet get_IEEE_phy_speed: Detected PHY with unknown identifier/model.\r\n"));
 	}
 #endif
 	if (isphy_pcspma(xaxiemacp, phy_addr)) {
@@ -1143,15 +1180,15 @@ static void __attribute__ ((noinline)) AxiEthernetUtilPhyDelay(unsigned int Seco
 	static int WarningFlag = 0;
 
 	/* If MB caches are disabled or do not exist, this delay loop could
-	 * take minutes instead of seconds (e.g., 30x longer).  Print a warning
-	 * message for the user (once).  If only MB had a built-in timer!
-	 */
+	* take minutes instead of seconds (e.g., 30x longer).  Print a warning
+	* message for the user (once).  If only MB had a built-in timer!
+	*/
 	if (((mfmsr() & 0x20) == 0) && (!WarningFlag)) {
 		WarningFlag = 1;
 	}
 
 #define ITERS_PER_SEC   (XPAR_CPU_CORE_CLOCK_FREQ_HZ / 6)
-    __asm volatile ("\n"
+	__asm volatile ("\n"
 			"1:               \n\t"
 			"addik r7, r0, %0 \n\t"
 			"2:               \n\t"
@@ -1162,7 +1199,7 @@ static void __attribute__ ((noinline)) AxiEthernetUtilPhyDelay(unsigned int Seco
 			"addik %1, %1, -1 \n\t"
 			:: "i"(ITERS_PER_SEC), "d" (Seconds));
 #else
-    sleep(Seconds);
+	sleep(Seconds);
 #endif
 }
 
@@ -1188,13 +1225,13 @@ void enable_sgmii_clock(XAxiEthernet *xaxiemacp)
 		if (phy_model == TI_PHY_DP83867_MODEL && phytype == XAE_PHY_TYPE_SGMII) {
 			/* Enable SGMII Clock by switching to 6-wire mode */
 			XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_REGCR,
-					      TI_PHY_REGCR_DEVAD_EN);
+						TI_PHY_REGCR_DEVAD_EN);
 			XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_ADDDR,
-					      TI_PHY_SGMIITYPE);
+						TI_PHY_SGMIITYPE);
 			XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_REGCR,
-					      TI_PHY_REGCR_DEVAD_EN | TI_PHY_REGCR_DEVAD_DATAEN);
+						TI_PHY_REGCR_DEVAD_EN | TI_PHY_REGCR_DEVAD_DATAEN);
 			XAxiEthernet_PhyWrite(xaxiemacp, phy_addr, TI_PHY_ADDDR,
-					      TI_PHY_SGMIICLK_EN);
+						TI_PHY_SGMIICLK_EN);
 		}
 	}
 }
