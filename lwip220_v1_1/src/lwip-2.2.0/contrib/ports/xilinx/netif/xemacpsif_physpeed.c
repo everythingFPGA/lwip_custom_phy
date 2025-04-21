@@ -118,7 +118,8 @@
 #endif
 
 /* LANTIQ PHY Flags */ 
-#define PHY_LANTIQ_IDENTIFIER 	0x0302
+#define PHY_ID_PHY11G_1_5 		0xD565A401
+#define PHY_LANTIQ_IDENTIFIER 	0xD565
 #define IEEE_MII_CONTROL_REG	0x17
 #define IEEE_MII_STATUS_REG		0x18
 
@@ -607,31 +608,138 @@ static u32_t get_TI_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 	return XST_SUCCESS;
 }
 
-// to test
-static u32_t get_LANTIQ_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr) {
-    u16_t control, status, partner_caps;
-    xil_printf("Lantiq PHY: starting auto-negotiation\r\n");
+// Lantiq
+static u32_t get_Lantiq_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
+{
+	u16_t temp;
+	u16_t control;
+	u16_t status;
+	u16_t status_speed;
+	u32_t timeout_counter = 0;
+	u16_t MiiCtrlReg;
 
-    XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
-    control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE | IEEE_STAT_AUTONEGOTIATE_RESTART;
-    control &= IEEE_CTRL_ISOLATE_DISABLE;
-    XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+	xil_printf("phy%d, Starting PHY Lantiq Autonegotiation\r\n", phy_addr);
 
-    xil_printf("Waiting for auto-negotiation\r\n");
-    do {
-        sleep(1);
-        XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
-    } while (!(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE));
+	XEmacPs_PhyWrite(xemacpsp,phy_addr, IEEE_PAGE_ADDRESS_REGISTER, 2);
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_MAC, &control);
+	control |= IEEE_RGMII_TXRX_CLOCK_DELAYED_MASK;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_MAC, control);
 
-    xil_printf("Auto-negotiation complete\r\n");
-    XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_PARTNER_ABILITIES_1_REG_OFFSET, &partner_caps);
-    if (partner_caps & IEEE_AN1_ABILITY_MASK_100MBPS)
-        return 100;
-    else if (partner_caps & IEEE_AN1_ABILITY_MASK_10MBPS)
-        return 10;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_PAGE_ADDRESS_REGISTER, 0);
 
-    xil_printf("Lantiq PHY: unknown speed, defaulting to 10Mbps\r\n");
-    return 10;
+	// reset the MAC
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &MiiCtrlReg);
+	MiiCtrlReg |= IEEE_CTRL_RESET_MASK;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, MiiCtrlReg);
+
+	// wait for reset to complete
+	timeout_counter = 0;
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+
+	while ((control & IEEE_CTRL_RESET_MASK)){
+		sleep(1);
+		timeout_counter++;
+
+		if (timeout_counter >= 20){
+			// printf("phy%d Reset timeout after %d ms\r\n",phy_addr, timeout_counter);
+			return XST_FAILURE;
+		}
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	}
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_MII_CONTROL_REG, &control);
+
+	xil_printf("Default Lantiq IEEE_MII_CONTROL_REG value is 0x%x\r\n", control);
+	xil_printf("Default Lantiq skew values are: Rx=%d Tx=%d (ps)\r\n", ((control >> 12) & 0x7)*500, ((control >> 8) & 0x7)*500);
+
+	// control = 0x4D00;
+	control = 0xB500; // skew := 1.5 Rx & 2.5 Tx ns
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_MII_CONTROL_REG, control);
+	xil_printf("New Lantiq IEEE_MII_CONTROL_REG value is 0x%x\r\n", control);
+	xil_printf("New Lantiq skew values are: Rx=%d Tx=%d (ps)\r\n", ((control >> 12) & 0x7)*500, ((control >> 8) & 0x7)*500);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, &control);
+	control |= IEEE_ASYMMETRIC_PAUSE_MASK;
+	control |= IEEE_PAUSE_MASK;
+	control |= ADVERTISE_100;
+	control |= ADVERTISE_10;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_AUTONEGO_ADVERTISE_REG, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET, &control);
+	control |= ADVERTISE_1000;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_1000_ADVERTISE_REG_OFFSET, control);
+
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_PAGE_ADDRESS_REGISTER, 0);
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_COPPER_SPECIFIC_CONTROL_REG, &control);
+	control |= (7 << 12);	/* max number of gigabit attempts */
+	control |= (1 << 11);	/* enable downshift */
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_COPPER_SPECIFIC_CONTROL_REG, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+	control |= IEEE_CTRL_AUTONEGOTIATE_ENABLE;
+	control |= IEEE_STAT_AUTONEGOTIATE_RESTART;
+	XEmacPs_PhyWrite(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_CONTROL_REG_OFFSET, &control);
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+
+	xil_printf("Waiting for PHY to complete autonegotiation.\r\n");
+
+	timeout_counter = 0;
+	while ( !(status & IEEE_STAT_AUTONEGOTIATE_COMPLETE) ) {
+		sleep(1);
+		// XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_COPPER_SPECIFIC_STATUS_REG_2,  &temp);
+		timeout_counter++;
+
+		if (timeout_counter == 20) {
+			xil_printf("Auto negotiation error \r\n");
+			return XST_FAILURE;
+		}
+		XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_STATUS_REG_OFFSET, &status);
+	}
+	xil_printf("Autonegotiation complete \r\n");
+
+	XEmacPs_PhyRead(xemacpsp, phy_addr, IEEE_MII_STATUS_REG, &status_speed);
+
+	// u16_t pause_status = (status_speed & 0x0030) >> 4;
+	// xil_printf("Flow Control: ");
+	// switch (pause_status) {
+	// 	case 0:
+	// 		xil_printf("No PAUSE\r\n");
+	// 		break;
+	// 	case 1:
+	// 		xil_printf("Transmit PAUSE\r\n");
+	// 		break;
+	// 	case 2:
+	// 		xil_printf("Receive PAUSE\r\n");
+	// 		break;
+	// 	case 3:
+	// 		xil_printf("Transmit and Receive PAUSE\r\n");
+	// 		break;
+	// 	default:
+	// 		xil_printf("Unknown PAUSE\r\n");
+	// 		break;
+	// }
+	
+	xil_printf("Energy-Efficient Ethernet is: %d\r\n",(status_speed & 0x0004));
+
+	switch (status_speed & 0x0003){
+		case 0:
+			return 10;
+			break;
+		case 1:
+			return 100;
+			break;
+		case 2:
+			return 1000;
+			break;
+		default:
+			return XST_FAILURE;
+			break;
+	}
+
+	return XST_SUCCESS;
 }
 
 static u32_t get_Marvell_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
@@ -1240,8 +1348,7 @@ static u32_t get_IEEE_phy_speed(XEmacPs *xemacpsp, u32_t phy_addr)
 		RetStatus = get_YT8531_phy_speed(xemacpsp, phy_addr);
 	} else if (phy_identity == PHY_LANTIQ_IDENTIFIER) {
 		xil_printf("Phy %d is LANTIQ\n\r", phy_addr);
-		RetStatus = get_LANTIQ_phy_speed(xemacpsp, phy_addr);	//test
-		// RetStatus = get_Lantiq_phy_speed(xemacpsp, phy_addr);
+		RetStatus = get_Lantiq_phy_speed(xemacpsp, phy_addr);
 	} else {
 		RetStatus = get_Marvell_phy_speed(xemacpsp, phy_addr);
 	}

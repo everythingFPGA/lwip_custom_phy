@@ -7,3 +7,4 @@ Added additional support for Ethernet PHY:
 - JLSemi JL2121
 - Realtek RTL8211
 - Motorcomm YT8531
+- Lantiq PHY11G aka PEF 7071 v1.5
